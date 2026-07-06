@@ -297,20 +297,48 @@ function cloudLoad(cb){
   } catch(e){ cb(null); }
 }
 
+/* --- синхронизация с сервером (источник истины, когда доступен) --- */
+const initData = tg?.initData || '';
+let apiOk = false, apiTimer = null;
+async function apiLoad(){
+  if (!initData) return null;
+  try {
+    const r = await fetch('/api/tasks', { headers: { 'X-Init-Data': initData } });
+    if (!r.ok) return null;
+    apiOk = true;
+    return await r.json();
+  } catch(e){ return null; }
+}
+function apiSave(){
+  if (!initData || !apiOk) return;
+  clearTimeout(apiTimer);
+  apiTimer = setTimeout(()=>{
+    fetch('/api/tasks', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Init-Data': initData },
+      body: JSON.stringify(tasks)
+    }).catch(()=>{});
+  }, 400);
+}
+
 let tasks = [];
 function load(){
   const raw = lsGet();
   if (raw) { try { tasks = JSON.parse(raw) || []; } catch(e){ tasks = []; } }
-  cloudLoad(json => {
-    if (json) { try {
-      const cloud = JSON.parse(json);
-      if (Array.isArray(cloud) && cloud.length > tasks.length) { tasks = cloud; renderAll(); }
-    } catch(e){} }
+  // сервер — главный источник; локальные копии — офлайн-кэш
+  apiLoad().then(server => {
+    if (server) { tasks = server; lsSet(JSON.stringify(tasks)); renderAll(); return; }
+    cloudLoad(json => {
+      if (json) { try {
+        const cloud = JSON.parse(json);
+        if (Array.isArray(cloud) && cloud.length > tasks.length) { tasks = cloud; renderAll(); }
+      } catch(e){} }
+    });
   });
 }
 function save(){
   const json = JSON.stringify(tasks);
-  lsSet(json); cloudSave(json);
+  lsSet(json); cloudSave(json); apiSave();
 }
 
 /* ================= Даты ================= */
